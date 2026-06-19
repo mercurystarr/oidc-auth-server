@@ -34,3 +34,5 @@ bin/
 ### Gradle ###
 build/
 .gradle/
+
+PLAN.md
