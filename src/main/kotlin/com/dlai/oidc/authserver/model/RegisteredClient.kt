@@ -1,4 +1,4 @@
-package com.dlai.oidc.authserver
+package com.dlai.oidc.authserver.model
 
 /**
  * Represents a registered OAuth2 client.

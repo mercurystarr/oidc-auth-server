@@ -1,11 +1,12 @@
-package com.dlai.oidc.authserver
+package com.dlai.oidc.authserver.service
 
+import com.dlai.oidc.authserver.security.JwtSigningKeyManager
 import com.nimbusds.jose.JWSAlgorithm
 import com.nimbusds.jose.JWSHeader
 import com.nimbusds.jose.crypto.RSASSASigner
 import com.nimbusds.jwt.JWTClaimsSet
 import com.nimbusds.jwt.SignedJWT
-import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assertions
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -29,63 +30,69 @@ class TokenServiceTest {
         val token = tokenService.issueAccessToken(subject, clientId, scopes)
         val claims = tokenService.verify(token)
 
-        assertEquals(subject, claims.subject)
-        assertEquals(issuer, claims.issuer)
-        assertTrue(claims.audience.contains(issuer))
-        assertEquals(clientId, claims.getStringClaim("client_id"))
-        assertEquals("openid profile", claims.getStringClaim("scope"))
+        Assertions.assertEquals(subject, claims.subject)
+        Assertions.assertEquals(issuer, claims.issuer)
+        Assertions.assertTrue(claims.audience.contains(issuer))
+        Assertions.assertEquals(clientId, claims.getStringClaim("client_id"))
+        Assertions.assertEquals("openid profile", claims.getStringClaim("scope"))
     }
 
-    @Test fun `issued ID token has client id as audience`() {
+    @Test
+    fun `issued ID token has client id as audience`() {
         val authTime = Instant.now()
         val token = tokenService.issueIdToken(subject, clientId, authTime, null)
         val claims = tokenService.verify(token)
 
-        assertEquals(subject, claims.subject)
-        assertEquals(issuer, claims.issuer)
-        assertTrue(claims.audience.contains(clientId))
-        assertEquals(Date.from(authTime.truncatedTo(ChronoUnit.SECONDS)), claims.getDateClaim("auth_time"))
+        Assertions.assertEquals(subject, claims.subject)
+        Assertions.assertEquals(issuer, claims.issuer)
+        Assertions.assertTrue(claims.audience.contains(clientId))
+        Assertions.assertEquals(Date.from(authTime.truncatedTo(ChronoUnit.SECONDS)), claims.getDateClaim("auth_time"))
 
     }
 
-    @Test fun `nonce is present when provided`() {
+    @Test
+    fun `nonce is present when provided`() {
         val authTime = Instant.now()
         val token = tokenService.issueIdToken(subject, clientId, authTime, "nonce")
         val claims = tokenService.verify(token)
 
-        assertEquals(subject, claims.subject)
-        assertEquals(issuer, claims.issuer)
-        assertTrue(claims.audience.contains(clientId))
-        assertEquals(Date.from(authTime.truncatedTo(ChronoUnit.SECONDS)), claims.getDateClaim("auth_time"))
-        assertEquals("nonce", claims.getStringClaim("nonce"))
+        Assertions.assertEquals(subject, claims.subject)
+        Assertions.assertEquals(issuer, claims.issuer)
+        Assertions.assertTrue(claims.audience.contains(clientId))
+        Assertions.assertEquals(Date.from(authTime.truncatedTo(ChronoUnit.SECONDS)), claims.getDateClaim("auth_time"))
+        Assertions.assertEquals("nonce", claims.getStringClaim("nonce"))
     }
 
-    @Test fun `nonce is absent when not provided`() {
+    @Test
+    fun `nonce is absent when not provided`() {
         val authTime = Instant.now()
         val token = tokenService.issueIdToken(subject, clientId, authTime, null)
         val claims = tokenService.verify(token)
 
-        assertEquals(subject, claims.subject)
-        assertEquals(issuer, claims.issuer)
-        assertTrue(claims.audience.contains(clientId))
-        assertEquals(Date.from(authTime.truncatedTo(ChronoUnit.SECONDS)), claims.getDateClaim("auth_time"))
-        assertNull(claims.getStringClaim("nonce"))
+        Assertions.assertEquals(subject, claims.subject)
+        Assertions.assertEquals(issuer, claims.issuer)
+        Assertions.assertTrue(claims.audience.contains(clientId))
+        Assertions.assertEquals(Date.from(authTime.truncatedTo(ChronoUnit.SECONDS)), claims.getDateClaim("auth_time"))
+        Assertions.assertNull(claims.getStringClaim("nonce"))
     }
 
-    @Test fun `verify rejects a token signed with a different key`() {
+    @Test
+    fun `verify rejects a token signed with a different key`() {
         val keyManager2 = JwtSigningKeyManager()
         val tokenService2 = TokenService(keyManager2, issuer, expiryTime, refreshExpiryTime)
         val token = tokenService2.issueAccessToken(subject, clientId, scopes)
-        assertThrows(IllegalArgumentException::class.java) { tokenService.verify(token) }
+        Assertions.assertThrows(IllegalArgumentException::class.java) { tokenService.verify(token) }
     }
 
-    @Test fun `verify rejects an expired token`() {
+    @Test
+    fun `verify rejects an expired token`() {
         val token = tokenService.issueAccessToken(subject, clientId, scopes)
         Thread.sleep(1000)
-        assertThrows(IllegalArgumentException::class.java) { tokenService.verify(token) }
+        Assertions.assertThrows(IllegalArgumentException::class.java) { tokenService.verify(token) }
     }
 
-    @Test fun `verify rejects a token missing the exp claim`() {
+    @Test
+    fun `verify rejects a token missing the exp claim`() {
         // Build a claim set without exp claim
         val now = Instant.now()
         val claimsBuilder = JWTClaimsSet.Builder()
@@ -104,21 +111,23 @@ class TokenServiceTest {
 
         val token = signedJWT.serialize()
 
-        assertThrows(IllegalArgumentException::class.java) { tokenService.verify(token) }
+        Assertions.assertThrows(IllegalArgumentException::class.java) { tokenService.verify(token) }
     }
 
-    @Test fun `issued refresh tokens are non-blank and unique`() {
+    @Test
+    fun `issued refresh tokens are non-blank and unique`() {
         val refreshToken = tokenService.issueRefreshToken()
-        assertNotNull(refreshToken)
-        assertNotEquals("", refreshToken.first)
-        assertNotEquals(tokenService.issueRefreshToken(), refreshToken)
+        Assertions.assertNotNull(refreshToken)
+        Assertions.assertNotEquals("", refreshToken.first)
+        Assertions.assertNotEquals(tokenService.issueRefreshToken(), refreshToken)
     }
 
-    @Test fun `refresh token expiry is approximately now plus refreshExpiryTime`() {
+    @Test
+    fun `refresh token expiry is approximately now plus refreshExpiryTime`() {
         val (refreshToken, expiry) = tokenService.issueRefreshToken()
         val now = Instant.now()
-        assertTrue(expiry.isAfter(now))
-        assertTrue(expiry.minusSeconds(refreshExpiryTime).isBefore(now))
+        Assertions.assertTrue(expiry.isAfter(now))
+        Assertions.assertTrue(expiry.minusSeconds(refreshExpiryTime).isBefore(now))
     }
 
 

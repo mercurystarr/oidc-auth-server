@@ -1,4 +1,4 @@
-package com.dlai.oidc.authserver
+package com.dlai.oidc.authserver.model
 
 import java.time.Instant
 

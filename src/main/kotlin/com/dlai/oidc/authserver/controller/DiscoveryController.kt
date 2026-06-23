@@ -1,5 +1,6 @@
-package com.dlai.oidc.authserver
+package com.dlai.oidc.authserver.controller
 
+import com.dlai.oidc.authserver.security.JwtSigningKeyManager
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.GetMapping

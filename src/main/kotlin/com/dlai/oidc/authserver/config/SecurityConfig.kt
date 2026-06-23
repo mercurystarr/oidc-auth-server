@@ -1,4 +1,4 @@
-package com.dlai.oidc.authserver
+package com.dlai.oidc.authserver.config
 
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration

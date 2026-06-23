@@ -1,5 +1,6 @@
-package com.dlai.oidc.authserver
+package com.dlai.oidc.authserver.service
 
+import com.dlai.oidc.authserver.security.JwtSigningKeyManager
 import com.nimbusds.jose.JWSAlgorithm
 import com.nimbusds.jose.JWSHeader
 import com.nimbusds.jose.crypto.RSASSASigner

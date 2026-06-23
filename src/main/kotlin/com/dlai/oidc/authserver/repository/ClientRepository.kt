@@ -1,5 +1,6 @@
-package com.dlai.oidc.authserver
+package com.dlai.oidc.authserver.repository
 
+import com.dlai.oidc.authserver.model.RegisteredClient
 import org.springframework.stereotype.Repository
 import java.util.concurrent.ConcurrentHashMap
 

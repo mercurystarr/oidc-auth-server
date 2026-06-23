@@ -1,5 +1,8 @@
-package com.dlai.oidc.authserver
+package com.dlai.oidc.authserver.security
 
+import com.nimbusds.jose.JWSAlgorithm
+import com.nimbusds.jose.jwk.JWKSet
+import com.nimbusds.jose.jwk.KeyUse
 import com.nimbusds.jose.jwk.RSAKey
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator
 import org.springframework.stereotype.Component
@@ -22,10 +25,10 @@ class JwtSigningKeyManager {
 
     val rsaKey: RSAKey = RSAKeyGenerator(2048)
         .keyID(keyId)
-        .keyUse(com.nimbusds.jose.jwk.KeyUse.SIGNATURE)
-        .algorithm(com.nimbusds.jose.JWSAlgorithm.RS256)
+        .keyUse(KeyUse.SIGNATURE)
+        .algorithm(JWSAlgorithm.RS256)
         .generate()
 
     /** Public JWK set, safe to expose at /.well-known/jwks.json */
-    fun publicJwkSet(): String = com.nimbusds.jose.jwk.JWKSet(rsaKey.toPublicJWK()).toString()
+    fun publicJwkSet(): String = JWKSet(rsaKey.toPublicJWK()).toString()
 }

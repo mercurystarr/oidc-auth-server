@@ -1,4 +1,4 @@
-package com.dlai.oidc.authserver
+package com.dlai.oidc.authserver.security
 
 import java.security.MessageDigest
 import java.util.Base64
