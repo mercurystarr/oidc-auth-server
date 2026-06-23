@@ -1,6 +1,6 @@
 plugins {
     kotlin("jvm") version "2.4.0"
-    kotlin("plugin.spring") version "2.4.0"   // match your kotlin("jvm") version
+    kotlin("plugin.spring") version "2.4.0"
     id("org.springframework.boot") version "4.1.0"
     id("io.spring.dependency-management") version "1.1.7"
 }
@@ -23,7 +23,7 @@ dependencies {
 }
 
 kotlin {
-    jvmToolchain(21)   // unchanged — Boot 4 is fine with this
+    jvmToolchain(21)
 }
 
 tasks.withType<Test> {
