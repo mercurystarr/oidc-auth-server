@@ -1,5 +1,6 @@
 package com.dlai.oidc.authserver.service
 
+import com.dlai.oidc.authserver.model.RefreshToken
 import com.dlai.oidc.authserver.security.JwtSigningKeyManager
 import com.nimbusds.jose.JWSAlgorithm
 import com.nimbusds.jose.JWSHeader
@@ -14,6 +15,11 @@ import java.time.Instant
 import java.util.Base64
 import java.util.Date
 import java.util.UUID
+
+/**
+ * Issues RS256-signed access/ID tokens and opaque refresh tokens and verifies signed JWTs
+ * (signature + expiry) on redemption.
+ */
 
 @Service
 class TokenService(
@@ -62,12 +68,20 @@ class TokenService(
         return signedJWT.serialize()
     }
 
-    fun issueRefreshToken(): Pair<String, Instant> {
+    fun issueRefreshToken(subject: String, clientId: String, scopes: Set<String>, authTime: Instant, nonce: String?): RefreshToken {
         val bytes = ByteArray(32)
         secureRandom.nextBytes(bytes)
         val token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
 
-        return Pair(token, Instant.now().plusSeconds(refreshExpiryTime))
+        return RefreshToken.Builder()
+            .token(token)
+            .subject(subject)
+            .clientId(clientId)
+            .scopes(scopes)
+            .authTime(authTime)
+            .expiresAt(Instant.now().plusSeconds(refreshExpiryTime))
+            .nonce(nonce)
+            .build()
     }
 
     fun verify(token: String): JWTClaimsSet {

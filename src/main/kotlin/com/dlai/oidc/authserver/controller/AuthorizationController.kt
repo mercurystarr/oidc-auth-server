@@ -3,6 +3,8 @@ package com.dlai.oidc.authserver.controller
 import com.dlai.oidc.authserver.model.AuthorizationCode
 import com.dlai.oidc.authserver.repository.AuthorizationCodeRepository
 import com.dlai.oidc.authserver.repository.ClientRepository
+import com.dlai.oidc.authserver.repository.RefreshTokenRepository
+import com.dlai.oidc.authserver.security.PkceValidator
 import com.dlai.oidc.authserver.service.TokenService
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
@@ -26,9 +28,11 @@ import java.util.Base64
 @RestController
 class AuthorizationController(
     private val clientRepository: ClientRepository,
-    private val authorizationCodeRepository: AuthorizationCodeRepository,
+    private val authCodeRepository: AuthorizationCodeRepository,
+    private val refreshTokenRepository: RefreshTokenRepository,
     private val tokenService: TokenService,
     @Value("\${auth.codeExpiryTime}") private val codeExpiryTime: Long,
+    @Value("\${auth.expiryTime}") private val expiryTime: Long,
 ) {
 
     private val secureRandom = SecureRandom()
@@ -75,7 +79,7 @@ class AuthorizationController(
             .expiresAt(authTime.plusSeconds(codeExpiryTime))
             .build()
 
-        authorizationCodeRepository.save(authorizationCode)
+        authCodeRepository.save(authorizationCode)
 
         val redirectUriWithCode: URI = UriComponentsBuilder
             .fromUriString(redirectUri)
@@ -97,19 +101,98 @@ class AuthorizationController(
         @RequestParam("client_id") clientId: String,
         @RequestParam("code_verifier", required = false) codeVerifier: String?,
         @RequestParam("refresh_token", required = false) refreshToken: String?
-    ): Map<String, Any> {
-        // TODO: branch on grant_type:
-        //   "authorization_code" ->
-        //     1. Look up the stored AuthorizationCode by `code`
-        //     2. Reject if missing, expired, or already consumed (single-use enforcement)
-        //     3. Reject if redirect_uri doesn't match what was used at /authorize
-        //     4. PkceValidator.verify(codeVerifier, storedCode.codeChallenge, storedCode.codeChallengeMethod)
-        //     5. Mark the code consumed, issue access/ID/refresh tokens via tokenService
-        //   "refresh_token" ->
-        //     1. Look up the stored refresh token, reject if missing/expired/revoked
-        //     2. Issue a new access token (and consider rotating the refresh token itself —
-        //        rotation on use is current best practice per RFC 9700, since it lets you
-        //        detect token theft if an old refresh token is replayed after rotation)
-        throw NotImplementedError("Implement the token exchange — see TODOs above")
+    ): ResponseEntity<Map<String, Any>> {
+        if (grantType == "authorization_code") {
+            if (code == null) throw IllegalArgumentException("code is required")
+            if (codeVerifier == null) throw IllegalArgumentException("code_verifier is required")
+
+            val authCode = authCodeRepository.consume(code) ?: throw IllegalArgumentException("Invalid code")
+
+            if (clientId != authCode.clientId) {
+                throw IllegalArgumentException("Invalid client_id")
+            }
+            if (redirectUri != authCode.redirectUri) {
+                throw IllegalArgumentException("Invalid redirect_uri")
+            }
+            if (!PkceValidator.verify(codeVerifier, authCode.codeChallenge, authCode.codeChallengeMethod)) {
+                throw IllegalArgumentException("Invalid code_verifier")
+            }
+            val responseBody = HashMap<String, Any>()
+            responseBody["access_token"] = tokenService.issueAccessToken(authCode.subject, clientId, authCode.scopes)
+            if (authCode.scopes.contains("openid")) {
+                responseBody["id_token"] =
+                    tokenService.issueIdToken(authCode.subject, clientId, authCode.authTime, authCode.nonce)
+            }
+            // Refresh tokens are currently issued on every authorization_code grant
+            // For a public client, OAuth 2.1 §4.3.3 says they should only be issued when offline_access was explicitly
+            // in the requested scopes
+            val issuedRefreshToken = tokenService.issueRefreshToken(
+                authCode.subject,
+                clientId,
+                authCode.scopes,
+                authCode.authTime,
+                authCode.nonce
+            )
+            refreshTokenRepository.save(issuedRefreshToken)
+            responseBody["refresh_token"] = issuedRefreshToken.token
+            if (authCode.scopes.isNotEmpty())
+                responseBody["scope"] = authCode.scopes.joinToString(" ")
+            responseBody["token_type"] = "Bearer"
+            responseBody["expires_in"] = expiryTime
+            return ResponseEntity.ok()
+                .header("Cache-Control", "no-store")
+                .header("Pragma", "no-cache")
+                .body(responseBody)
+        } else if (grantType == "refresh_token") {
+            if (refreshToken == null) throw IllegalArgumentException("refresh_token is required")
+            val token = refreshTokenRepository.consume(refreshToken)
+            when (token) {
+                is RefreshTokenRepository.RefreshTokenResult.Reused -> {
+                    throw IllegalArgumentException("Invalid refresh_token")
+                }
+
+                is RefreshTokenRepository.RefreshTokenResult.Valid -> {
+
+                    val responseBody = HashMap<String, Any>()
+                    // RFC 6749 §6 ensure that the refresh token was issued to the authenticated client
+                    if (clientId != token.refreshToken.clientId) {
+                        throw IllegalArgumentException("Invalid client_id")
+                    }
+                    responseBody["access_token"] =
+                        tokenService.issueAccessToken(token.refreshToken.subject, clientId, token.refreshToken.scopes)
+                    if (token.refreshToken.scopes.contains("openid")) {
+                        responseBody["id_token"] = tokenService.issueIdToken(
+                            token.refreshToken.subject,
+                            clientId,
+                            token.refreshToken.authTime,
+                            token.refreshToken.nonce
+                        )
+                    }
+                    val newRefreshToken = tokenService.issueRefreshToken(
+                        token.refreshToken.subject,
+                        clientId,
+                        token.refreshToken.scopes,
+                        token.refreshToken.authTime,
+                        token.refreshToken.nonce
+                    )
+                    refreshTokenRepository.save(newRefreshToken)
+                    responseBody["refresh_token"] = newRefreshToken.token
+                    if (token.refreshToken.scopes.isNotEmpty())
+                        responseBody["scope"] = token.refreshToken.scopes.joinToString(" ")
+                    responseBody["token_type"] = "Bearer"
+                    responseBody["expires_in"] = expiryTime
+                    return ResponseEntity.ok()
+                        .header("Cache-Control", "no-store")
+                        .header("Pragma", "no-cache")
+                        .body(responseBody)
+                }
+
+                RefreshTokenRepository.RefreshTokenResult.NotFound -> {
+                    throw IllegalArgumentException("Invalid refresh_token")
+                }
+            }
+        } else {
+            throw IllegalArgumentException("grant_type must be 'authorization_code' or 'refresh_token'")
+        }
     }
 }

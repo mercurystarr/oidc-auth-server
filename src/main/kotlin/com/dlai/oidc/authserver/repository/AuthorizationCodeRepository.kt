@@ -4,6 +4,9 @@ import com.dlai.oidc.authserver.model.AuthorizationCode
 import org.springframework.stereotype.Repository
 import java.util.concurrent.ConcurrentHashMap
 
+/**
+ * Threadsafe, in-memory authorization code store.
+ */
 @Repository
 class AuthorizationCodeRepository {
     private val authCodes = ConcurrentHashMap<String, AuthorizationCode>()
