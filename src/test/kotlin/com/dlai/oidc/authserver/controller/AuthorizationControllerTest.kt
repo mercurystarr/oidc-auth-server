@@ -5,16 +5,21 @@ import com.dlai.oidc.authserver.repository.ClientRepository
 import com.dlai.oidc.authserver.repository.RefreshTokenRepository
 import com.dlai.oidc.authserver.security.JwtSigningKeyManager
 import com.dlai.oidc.authserver.service.TokenService
+import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertAll
 import org.junit.jupiter.api.assertNotNull
 import org.junit.jupiter.api.assertNull
 import org.springframework.security.authentication.TestingAuthenticationToken
 import org.springframework.web.util.UriComponentsBuilder
+import java.security.MessageDigest
+import java.util.Base64
 
 class AuthorizationControllerTest {
     val jwtSigningKeyManager = JwtSigningKeyManager()
@@ -28,153 +33,522 @@ class AuthorizationControllerTest {
     )
 
     val authentication = TestingAuthenticationToken("test-user", "password", "USER")
+    private val codeVerifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+    private val codeChallenge = computeChallenge(codeVerifier)
 
-    @Test
-    fun `successful authorization with openid scope`() {
-        val result = authorizationController.authorize(
+    @Nested
+    inner class AuthorizeEndpointTests {
+        @Test
+        fun `successful authorization with openid scope`() {
+            val result = authorizationController.authorize(
+                "code",
+                "demo-client",
+                "http://localhost:9700/callback",
+                "openid profile",
+                "state",
+                codeChallenge,
+                "S256",
+                null,
+                authentication
+            )
+            assertTrue(result.statusCode.is3xxRedirection)
+            assertTrue(result.headers.location.toString().contains("code="))
+            assertTrue(result.headers.location.toString().contains("state="))
+        }
+
+        @Test
+        fun `expect exception when response_type is not code`() {
+            val exception = assertThrows(IllegalArgumentException::class.java) {
+                authorizationController.authorize(
+                    "some_other_response_type",
+                    "demo-client",
+                    "http://localhost:9700/callback",
+                    "profile email",
+                    "state",
+                    codeChallenge,
+                    "S256",
+                    null,
+                    authentication
+                )
+            }
+            assertEquals("response_type must be 'code'", exception.message)
+        }
+
+        @Test
+        fun `expect exception when clientId not registered`() {
+            val exception = assertThrows(IllegalArgumentException::class.java) {
+                authorizationController.authorize(
+                    "code",
+                    "other-client",
+                    "http://localhost:9700/callback",
+                    "profile email",
+                    "state",
+                    codeChallenge,
+                    "S256",
+                    null,
+                    authentication
+                )
+            }
+            assertEquals("Invalid client_id", exception.message)
+        }
+
+        @Test
+        fun `expect exception when redirectUri not registered`() {
+            val exception = assertThrows(IllegalArgumentException::class.java) {
+                authorizationController.authorize(
+                    "code",
+                    "demo-client",
+                    "http://test.com/callback",
+                    "profile email",
+                    "state",
+                    codeChallenge,
+                    "S256",
+                    null,
+                    authentication
+                )
+            }
+            assertEquals("Invalid redirect_uri", exception.message)
+        }
+
+        @Test
+        fun `expect exception when code_challenge_method is not supported for authorize request`() {
+            val exception = assertThrows(IllegalArgumentException::class.java) {
+                authorizationController.authorize(
+                    "code",
+                    "demo-client",
+                    "http://localhost:9700/callback",
+                    "profile email",
+                    "state",
+                    codeChallenge,
+                    "OtherMethod",
+                    null,
+                    authentication
+                )
+            }
+            assertEquals("code_challenge_method must be 'S256'", exception.message)
+        }
+
+        @Test
+        fun `stored authorization code has correct fields`() {
+            val result = authorizationController.authorize(
+                "code",
+                "demo-client",
+                "http://localhost:9700/callback",
+                "openid profile",
+                "state",
+                codeChallenge,
+                "S256",
+                null,
+                authentication
+            )
+            assertTrue(result.statusCode.is3xxRedirection)
+            assertTrue(result.headers.location.toString().contains("code="))
+
+            val location = result.headers.location!!
+            val code = UriComponentsBuilder.fromUri(location).build().queryParams.getFirst("code")!!
+            val authCode = authCodeRepository.consume(code)
+
+            assertNotNull(authCode)
+            assertAll(
+                { assertEquals("demo-client", authCode.clientId) },
+                { assertEquals("test-user", authCode.subject) },
+                { assertEquals(setOf("openid", "profile"), authCode.scopes) },
+                { assertEquals(codeChallenge, authCode.codeChallenge) },
+                { assertEquals("S256", authCode.codeChallengeMethod) },
+                { assertNull(authCode.nonce) },
+                { assertTrue(authCode.consumed) },
+                { assertFalse(authCode.isExpired()) }
+            )
+        }
+
+        @Test
+        fun `nonce is stored when provided`() {
+            val result = authorizationController.authorize(
+                "code",
+                "demo-client",
+                "http://localhost:9700/callback",
+                "openid profile",
+                "state",
+                codeChallenge,
+                "S256",
+                "nonce",
+                authentication
+            )
+            assertTrue(result.statusCode.is3xxRedirection)
+            assertTrue(result.headers.location.toString().contains("code="))
+
+            val location = result.headers.location!!
+            val code = UriComponentsBuilder.fromUri(location).build().queryParams.getFirst("code")!!
+            val authCode = authCodeRepository.consume(code)
+
+            assertNotNull(authCode)
+            assertEquals("nonce", authCode.nonce)
+        }
+    }
+
+    @Nested
+    inner class TokenEndpointAuthorizationCodeGrantTests {
+        @Test
+        fun `successful token request with authorization_code grant type`() {
+            val authCodeResult = authorizationController.authorize(
+                "code",
+                "demo-client",
+                "http://localhost:9700/callback",
+                "openid profile",
+                "state",
+                codeChallenge,
+                "S256",
+                null,
+                authentication
+            )
+
+            val location = authCodeResult.headers.location!!
+            val code = UriComponentsBuilder.fromUri(location).build().queryParams.getFirst("code")!!
+
+            val result = authorizationController.token(
+                "authorization_code",
+                code,
+                "http://localhost:9700/callback",
+                "demo-client",
+                codeVerifier,
+                null
+            )
+            assertTrue(result.statusCode.is2xxSuccessful)
+
+            val responseBody = result.body!!
+            assertNotNull(responseBody["access_token"])
+            assertNotNull(responseBody["id_token"])
+            assertNotNull(responseBody["refresh_token"])
+            assertNotNull(responseBody["scope"])
+            assertEquals("Bearer", responseBody["token_type"])
+            assertEquals(1L, responseBody["expires_in"])
+            assertTrue(responseBody["scope"].toString().contains("openid"))
+            assertTrue(responseBody["scope"].toString().contains("profile"))
+            assertEquals("no-store", result.headers.cacheControl)
+            assertDoesNotThrow { tokenService.verify(responseBody["access_token"] as String) }
+            assertDoesNotThrow { tokenService.verify(responseBody["id_token"] as String) }
+        }
+
+        @Test
+        fun `successful token request with authorization_code grant type without openid scope`() {
+            val authCodeResult = authorizationController.authorize(
+                "code",
+                "demo-client",
+                "http://localhost:9700/callback",
+                "profile email",
+                "state",
+                codeChallenge,
+                "S256",
+                null,
+                authentication
+            )
+
+            val location = authCodeResult.headers.location!!
+            val code = UriComponentsBuilder.fromUri(location).build().queryParams.getFirst("code")!!
+
+            val result = authorizationController.token(
+                "authorization_code",
+                code,
+                "http://localhost:9700/callback",
+                "demo-client",
+                codeVerifier,
+                null
+            )
+            assertTrue(result.statusCode.is2xxSuccessful)
+
+            val responseBody = result.body!!
+            assertNotNull(responseBody["access_token"])
+            assertNull(responseBody["id_token"])
+            assertNotNull(responseBody["refresh_token"])
+            assertNotNull(responseBody["scope"])
+            assertEquals("Bearer", responseBody["token_type"])
+            assertEquals(1L, responseBody["expires_in"])
+            assertTrue(responseBody["scope"].toString().contains("profile"))
+            assertTrue(responseBody["scope"].toString().contains("email"))
+            assertEquals("no-store", result.headers.cacheControl)
+            assertDoesNotThrow { tokenService.verify(responseBody["access_token"] as String) }
+        }
+
+        @Test
+        fun `expect exception when code not present`() {
+            val exception = assertThrows(IllegalArgumentException::class.java) {
+                authorizationController.token(
+                    "authorization_code",
+                    null,
+                    "http://localhost:9700/callback",
+                    "demo-client",
+                    codeVerifier,
+                    null
+                )
+            }
+            assertEquals("code is required", exception.message)
+        }
+
+        @Test
+        fun `expect exception when code_verifier not present`() {
+            val exception = assertThrows(IllegalArgumentException::class.java) {
+                authorizationController.token(
+                    "authorization_code",
+                    "code",
+                    "http://localhost:9700/callback",
+                    "demo-client",
+                    null,
+                    null
+                )
+            }
+            assertEquals("code_verifier is required", exception.message)
+        }
+
+        @Test
+        fun `expect exception when code does not match`() {
+            val exception = assertThrows(IllegalArgumentException::class.java) {
+                authorizationController.token(
+                    "authorization_code",
+                    "some-other-code",
+                    "http://localhost:9700/callback",
+                    "demo-client",
+                    codeVerifier,
+                    null
+                )
+            }
+            assertEquals("Invalid code", exception.message)
+        }
+
+        @Test
+        fun `expect exception when client_id does not match`() {
+            val authCodeResult = authorizationController.authorize(
+                "code",
+                "demo-client",
+                "http://localhost:9700/callback",
+                "openid profile",
+                "state",
+                codeChallenge,
+                "S256",
+                null,
+                authentication
+            )
+
+            val location = authCodeResult.headers.location!!
+            val code = UriComponentsBuilder.fromUri(location).build().queryParams.getFirst("code")!!
+
+            val exception = assertThrows(IllegalArgumentException::class.java) {
+                authorizationController.token(
+                    "authorization_code",
+                    code,
+                    "http://localhost:9700/callback",
+                    "other-client",
+                    codeVerifier,
+                    null
+                )
+            }
+            assertEquals("Invalid client_id", exception.message)
+        }
+
+        @Test
+        fun `expect exception when redirect_uri does not match`() {
+            val authCodeResult = authorizationController.authorize(
+                "code",
+                "demo-client",
+                "http://localhost:9700/callback",
+                "openid profile",
+                "state",
+                codeChallenge,
+                "S256",
+                null,
+                authentication
+            )
+
+            val location = authCodeResult.headers.location!!
+            val code = UriComponentsBuilder.fromUri(location).build().queryParams.getFirst("code")!!
+
+            val exception = assertThrows(IllegalArgumentException::class.java) {
+                authorizationController.token(
+                    "authorization_code",
+                    code,
+                    "http://test.com/callback",
+                    "demo-client",
+                    codeVerifier,
+                    null
+                )
+            }
+            assertEquals("Invalid redirect_uri", exception.message)
+        }
+
+        @Test
+        fun `expect exception when code_verifier does not match`() {
+            val authCodeResult = authorizationController.authorize(
+                "code",
+                "demo-client",
+                "http://localhost:9700/callback",
+                "openid profile",
+                "state",
+                codeChallenge,
+                "S256",
+                null,
+                authentication
+            )
+
+            val location = authCodeResult.headers.location!!
+            val code = UriComponentsBuilder.fromUri(location).build().queryParams.getFirst("code")!!
+
+            val exception = assertThrows(IllegalArgumentException::class.java) {
+                authorizationController.token(
+                    "authorization_code",
+                    code,
+                    "http://localhost:9700/callback",
+                    "demo-client",
+                    "a".repeat(43),
+                    null
+                )
+            }
+            assertEquals("Invalid code_verifier", exception.message)
+        }
+    }
+
+    @Nested
+    inner class TokenEndpointRefreshTokenGrantTests {
+
+        @Test
+        fun `successful token request with refresh_token grant type`() {
+            val refreshToken = getRefreshTokenWithScope("openid profile")
+
+            val refreshTokenResult = authorizationController.token(
+                "refresh_token",
+                null,
+                null,
+                "demo-client",
+                null,
+                refreshToken
+            )
+
+            assertTrue(refreshTokenResult.statusCode.is2xxSuccessful)
+            val responseBody = refreshTokenResult.body!!
+            assertNotNull(responseBody["access_token"])
+            assertNotNull(responseBody["id_token"])
+            assertNotNull(responseBody["refresh_token"])
+            assertNotNull(responseBody["scope"])
+            assertEquals("Bearer", responseBody["token_type"])
+            assertEquals(1L, responseBody["expires_in"])
+            assertTrue(responseBody["scope"].toString().contains("openid"))
+            assertTrue(responseBody["scope"].toString().contains("profile"))
+            assertEquals("no-store", refreshTokenResult.headers.cacheControl)
+
+            assertDoesNotThrow { tokenService.verify(responseBody["access_token"] as String) }
+            assertDoesNotThrow { tokenService.verify(responseBody["id_token"] as String) }
+            assertNotEquals(refreshToken, responseBody["refresh_token"] as String)
+        }
+
+        @Test
+        fun `successful token request with refresh_token grant type but without openid scope`() {
+            val refreshToken = getRefreshTokenWithScope("profile email")
+
+            val refreshTokenResult = authorizationController.token(
+                "refresh_token",
+                null,
+                null,
+                "demo-client",
+                null,
+                refreshToken
+            )
+
+            assertTrue(refreshTokenResult.statusCode.is2xxSuccessful)
+            val responseBody = refreshTokenResult.body!!
+            assertNotNull(responseBody["access_token"])
+            assertNull(responseBody["id_token"])
+            assertNotNull(responseBody["refresh_token"])
+            assertNotNull(responseBody["scope"])
+            assertEquals("Bearer", responseBody["token_type"])
+            assertEquals(1L, responseBody["expires_in"])
+            assertTrue(responseBody["scope"].toString().contains("profile"))
+            assertTrue(responseBody["scope"].toString().contains("email"))
+            assertEquals("no-store", refreshTokenResult.headers.cacheControl)
+
+            assertDoesNotThrow { tokenService.verify(responseBody["access_token"] as String) }
+            assertNotEquals(refreshToken, responseBody["refresh_token"] as String)
+        }
+
+        @Test
+        fun `expect exception when client_id does not match`() {
+            val refreshToken = getRefreshTokenWithScope("profile email")
+
+            val exception = assertThrows(IllegalArgumentException::class.java) {
+                authorizationController.token(
+                    "refresh_token",
+                    null,
+                    null,
+                    "other-client",
+                    null,
+                    refreshToken
+                )
+            }
+            assertEquals("Invalid client_id", exception.message)
+        }
+
+        @Test
+        fun `expect exception when refresh_token is reused`() {
+            val refreshToken = getRefreshTokenWithScope("profile email")
+            refreshTokenRepository.consume(refreshToken)
+
+            val exception = assertThrows(IllegalArgumentException::class.java) {
+                authorizationController.token(
+                    "refresh_token",
+                    null,
+                    null,
+                    "demo-client",
+                    null,
+                    refreshToken
+                )
+            }
+            assertEquals("Invalid refresh_token", exception.message)
+        }
+
+        @Test
+        fun `expect exception when refresh_token is not found`() {
+            val exception = assertThrows(IllegalArgumentException::class.java) {
+                authorizationController.token(
+                    "refresh_token",
+                    null,
+                    null,
+                    "demo-client",
+                    null,
+                    "this-token-does-not-exist"
+                )
+            }
+            assertEquals("Invalid refresh_token", exception.message)
+        }
+    }
+
+    // === Helpers ===
+
+    private fun computeChallenge(verifier: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hash = digest.digest(verifier.toByteArray(Charsets.US_ASCII))
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(hash)
+    }
+
+    private fun getRefreshTokenWithScope(scope: String = "openid profile"): String {
+        val codeResult = authorizationController.authorize(
             "code",
             "demo-client",
             "http://localhost:9700/callback",
-            "openid profile",
+            scope,
             "state",
-            "code_challenge",
+            codeChallenge,
             "S256",
             null,
             authentication
         )
-        assertTrue(result.statusCode.is3xxRedirection)
-        assertTrue(result.headers.location.toString().contains("code="))
-        assertTrue(result.headers.location.toString().contains("state="))
-    }
-
-    @Test
-    fun `expect exception when response_type is not code`() {
-        val exception = assertThrows(IllegalArgumentException::class.java) {
-            authorizationController.authorize(
-                "some_other_response_type",
-                "demo-client",
-                "http://localhost:9700/callback",
-                "profile email",
-                "state",
-                "code_challenge",
-                "S256",
-                null,
-                authentication
-            )
-        }
-        assertEquals("response_type must be 'code'", exception.message)
-    }
-
-    @Test
-    fun `expect exception when clientId not registered`() {
-        val exception = assertThrows(IllegalArgumentException::class.java) {
-            authorizationController.authorize(
-                "code",
-                "other-client",
-                "http://localhost:9700/callback",
-                "profile email",
-                "state",
-                "code_challenge",
-                "S256",
-                null,
-                authentication
-            )
-        }
-        assertEquals("Invalid client_id", exception.message)
-    }
-
-    @Test
-    fun `expect exception when redirectUri not registered`() {
-        val exception = assertThrows(IllegalArgumentException::class.java) {
-            authorizationController.authorize(
-                "code",
-                "demo-client",
-                "http://test.com/callback",
-                "profile email",
-                "state",
-                "code_challenge",
-                "S256",
-                null,
-                authentication
-            )
-        }
-        assertEquals("Invalid redirect_uri", exception.message)
-    }
-
-    @Test
-    fun `expect exception when code_challenge_method is not supported`() {
-        val exception = assertThrows(IllegalArgumentException::class.java) {
-            authorizationController.authorize(
-                "code",
-                "demo-client",
-                "http://localhost:9700/callback",
-                "profile email",
-                "state",
-                "code_challenge",
-                "OtherMethod",
-                null,
-                authentication
-            )
-        }
-        assertEquals("code_challenge_method must be 'S256'", exception.message)
-    }
-
-    @Test
-    fun `stored authorization code is has correct fields`() {
-        val result = authorizationController.authorize(
-            "code",
-            "demo-client",
+        val code = UriComponentsBuilder
+            .fromUri(codeResult.headers.location!!)
+            .build().queryParams.getFirst("code")!!
+        return authorizationController.token(
+            "authorization_code",
+            code,
             "http://localhost:9700/callback",
-            "openid profile",
-            "state",
-            "code_challenge",
-            "S256",
-            null,
-            authentication
-        )
-        assertTrue(result.statusCode.is3xxRedirection)
-        assertTrue(result.headers.location.toString().contains("code="))
-
-        val location = result.headers.location!!
-        val code = UriComponentsBuilder.fromUri(location).build().queryParams.getFirst("code")!!
-        val authCode = authCodeRepository.consume(code)
-
-        assertNotNull(authCode)
-        assertAll(
-            { assertEquals("demo-client", authCode.clientId) },
-            { assertEquals("test-user", authCode.subject) },
-            { assertEquals(setOf("openid", "profile"), authCode.scopes) },
-            { assertEquals("code_challenge", authCode.codeChallenge) },
-            { assertEquals("S256", authCode.codeChallengeMethod) },
-            { assertNull(authCode.nonce) },
-            { assertTrue(authCode.consumed) },
-            { assertFalse(authCode.isExpired()) }
-        )
-
-    }
-
-    @Test
-    fun `nonce is stored when provided`() {
-        val result = authorizationController.authorize(
-            "code",
             "demo-client",
-            "http://localhost:9700/callback",
-            "openid profile",
-            "state",
-            "code_challenge",
-            "S256",
-            "nonce",
-            authentication
-        )
-        assertTrue(result.statusCode.is3xxRedirection)
-        assertTrue(result.headers.location.toString().contains("code="))
-
-        val location = result.headers.location!!
-        val code = UriComponentsBuilder.fromUri(location).build().queryParams.getFirst("code")!!
-        val authCode = authCodeRepository.consume(code)
-
-        assertNotNull(authCode)
-        assertEquals("nonce", authCode.nonce)
+            codeVerifier,
+            null
+        ).body!!["refresh_token"] as String
     }
 
 

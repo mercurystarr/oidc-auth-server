@@ -145,8 +145,7 @@ class AuthorizationController(
                 .body(responseBody)
         } else if (grantType == "refresh_token") {
             if (refreshToken == null) throw IllegalArgumentException("refresh_token is required")
-            val token = refreshTokenRepository.consume(refreshToken)
-            when (token) {
+            when (val token = refreshTokenRepository.consume(refreshToken)) {
                 is RefreshTokenRepository.RefreshTokenResult.Reused -> {
                     throw IllegalArgumentException("Invalid refresh_token")
                 }
