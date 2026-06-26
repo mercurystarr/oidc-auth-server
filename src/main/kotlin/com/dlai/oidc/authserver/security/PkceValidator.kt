@@ -25,7 +25,7 @@ object PkceValidator {
             return false
         }
         // code_verifier constraints (RFC 7636 §4.1): unreserved URL character set only [A-Z] [a-z] [0-9] -. _ ~.
-        if(!unreservedRegex.matches(codeVerifier)) {
+        if (!unreservedRegex.matches(codeVerifier)) {
             return false
         }
 

@@ -28,7 +28,7 @@ class DiscoveryController(
         "id_token_signing_alg_values_supported" to listOf("RS256"),
         "code_challenge_methods_supported" to listOf("S256"),
         "grant_types_supported" to listOf("authorization_code", "refresh_token"),
-        "scopes_supported" to listOf("openid",  "profile",  "email")
+        "scopes_supported" to listOf("openid", "profile", "email")
     )
 
     @GetMapping("/.well-known/jwks.json", produces = [MediaType.APPLICATION_JSON_VALUE])

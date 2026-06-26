@@ -6,6 +6,7 @@ import com.dlai.oidc.authserver.repository.ClientRepository
 import com.dlai.oidc.authserver.repository.RefreshTokenRepository
 import com.dlai.oidc.authserver.security.JwtSigningKeyManager
 import com.dlai.oidc.authserver.service.TokenService
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -29,8 +30,9 @@ class AuthorizationControllerTest {
     val authCodeRepository = AuthorizationCodeRepository()
     val refreshTokenRepository = RefreshTokenRepository()
     val tokenService = TokenService(jwtSigningKeyManager, issuer, 1L, 10L)
+    val meterRegistry = SimpleMeterRegistry()
     val authorizationController = AuthorizationController(
-        clientRepository, authCodeRepository, refreshTokenRepository, tokenService, 1L, 1L
+        clientRepository, authCodeRepository, refreshTokenRepository, tokenService, meterRegistry,1L, 1L
     )
 
     val authentication = TestingAuthenticationToken("test-user", "password", "USER")

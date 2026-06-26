@@ -13,7 +13,7 @@ class AuthorizationCodeRepository {
 
     fun consume(code: String): AuthorizationCode? {
         return authCodes.computeIfPresent(code) { _, authCode ->
-           if (authCode.consumed || authCode.isExpired())
+            if (authCode.consumed || authCode.isExpired())
                null
            else
                authCode.copy(consumed = true)

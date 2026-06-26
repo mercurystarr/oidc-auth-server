@@ -35,7 +35,7 @@ class TokenService(
         val claimsBuilder = JWTClaimsSet.Builder()
             .subject(subject)
             .issuer(issuer)
-            .audience(issuer) //aud can also be a client id
+            .audience(issuer) // aud can also be a client id
             .issueTime(Date.from(now))
             .expirationTime(Date.from(now.plusSeconds(expiryTime)))
             .jwtID(UUID.randomUUID().toString())
@@ -49,7 +49,7 @@ class TokenService(
         val claimsBuilder = JWTClaimsSet.Builder()
             .subject(subject)
             .issuer(issuer)
-            .audience(clientId) //aud must be the client id
+            .audience(clientId) // aud must be the client id
             .issueTime(Date.from(now))
             .expirationTime(Date.from(now.plusSeconds(expiryTime)))
             .claim("auth_time", Date.from(authTime))
@@ -91,7 +91,7 @@ class TokenService(
             val expirationTime = signedJWT.jwtClaimsSet.expirationTime?.toInstant()
                 ?: throw IllegalArgumentException("Invalid token")
             if (expirationTime.isBefore(Instant.now())) {
-                throw IllegalArgumentException("Token Expired")
+                throw IllegalArgumentException("Token expired")
             }
             return signedJWT.jwtClaimsSet
         }
