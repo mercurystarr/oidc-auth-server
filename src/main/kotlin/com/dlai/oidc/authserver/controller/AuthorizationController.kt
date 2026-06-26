@@ -1,5 +1,6 @@
 package com.dlai.oidc.authserver.controller
 
+import com.dlai.oidc.authserver.exception.OAuthException
 import com.dlai.oidc.authserver.model.AuthorizationCode
 import com.dlai.oidc.authserver.repository.AuthorizationCodeRepository
 import com.dlai.oidc.authserver.repository.ClientRepository
@@ -50,16 +51,16 @@ class AuthorizationController(
         authentication: Authentication
     ): ResponseEntity<Void> {
         if (responseType != "code") {
-            throw IllegalArgumentException("response_type must be 'code'")
+            throw OAuthException("invalid_request", "response_type must be 'code'")
         }
 
-        val client = clientRepository.findById(clientId) ?: throw IllegalArgumentException("Invalid client_id")
+        val client = clientRepository.findById(clientId) ?: throw OAuthException("invalid_request", "Invalid client_id")
         if (!client.redirectUris.contains(redirectUri)) {
-            throw IllegalArgumentException("Invalid redirect_uri")
+            throw OAuthException("invalid_request", "Invalid redirect_uri")
         }
 
         if (codeChallengeMethod != "S256") {
-            throw IllegalArgumentException("code_challenge_method must be 'S256'")
+            throw OAuthException("invalid_request", "code_challenge_method must be 'S256'")
         }
 
         val authTime = Instant.now()
@@ -103,19 +104,19 @@ class AuthorizationController(
         @RequestParam("refresh_token", required = false) refreshToken: String?
     ): ResponseEntity<Map<String, Any>> {
         if (grantType == "authorization_code") {
-            if (code == null) throw IllegalArgumentException("code is required")
-            if (codeVerifier == null) throw IllegalArgumentException("code_verifier is required")
+            if (code == null) throw OAuthException("invalid_request", "code is required")
+            if (codeVerifier == null) throw OAuthException("invalid_request", "code_verifier is required")
 
-            val authCode = authCodeRepository.consume(code) ?: throw IllegalArgumentException("Invalid code")
+            val authCode = authCodeRepository.consume(code) ?: throw OAuthException("invalid_grant", "Invalid code")
 
             if (clientId != authCode.clientId) {
-                throw IllegalArgumentException("Invalid client_id")
+                throw OAuthException("invalid_grant", "Invalid client_id")
             }
             if (redirectUri != authCode.redirectUri) {
-                throw IllegalArgumentException("Invalid redirect_uri")
+                throw OAuthException("invalid_grant", "Invalid redirect_uri")
             }
             if (!PkceValidator.verify(codeVerifier, authCode.codeChallenge, authCode.codeChallengeMethod)) {
-                throw IllegalArgumentException("Invalid code_verifier")
+                throw OAuthException("invalid_grant", "Invalid code_verifier")
             }
             val responseBody = HashMap<String, Any>()
             responseBody["access_token"] = tokenService.issueAccessToken(authCode.subject, clientId, authCode.scopes)
@@ -144,10 +145,10 @@ class AuthorizationController(
                 .header("Pragma", "no-cache")
                 .body(responseBody)
         } else if (grantType == "refresh_token") {
-            if (refreshToken == null) throw IllegalArgumentException("refresh_token is required")
+            if (refreshToken == null) throw OAuthException("invalid_request", "refresh_token is required")
             when (val token = refreshTokenRepository.consume(refreshToken)) {
                 is RefreshTokenRepository.RefreshTokenResult.Reused -> {
-                    throw IllegalArgumentException("Invalid refresh_token")
+                    throw OAuthException("invalid_grant", "Invalid refresh_token")
                 }
 
                 is RefreshTokenRepository.RefreshTokenResult.Valid -> {
@@ -155,7 +156,7 @@ class AuthorizationController(
                     val responseBody = HashMap<String, Any>()
                     // RFC 6749 §6 ensure that the refresh token was issued to the authenticated client
                     if (clientId != token.refreshToken.clientId) {
-                        throw IllegalArgumentException("Invalid client_id")
+                        throw OAuthException("invalid_grant", "Invalid client_id")
                     }
                     responseBody["access_token"] =
                         tokenService.issueAccessToken(token.refreshToken.subject, clientId, token.refreshToken.scopes)
@@ -187,11 +188,11 @@ class AuthorizationController(
                 }
 
                 RefreshTokenRepository.RefreshTokenResult.NotFound -> {
-                    throw IllegalArgumentException("Invalid refresh_token")
+                    throw OAuthException("invalid_grant", "Invalid refresh_token")
                 }
             }
         } else {
-            throw IllegalArgumentException("grant_type must be 'authorization_code' or 'refresh_token'")
+            throw OAuthException("unsupported_grant_type", "grant_type must be 'authorization_code' or 'refresh_token'")
         }
     }
 }

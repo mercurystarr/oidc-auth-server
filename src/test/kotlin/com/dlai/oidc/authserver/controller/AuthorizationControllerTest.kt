@@ -1,5 +1,6 @@
 package com.dlai.oidc.authserver.controller
 
+import com.dlai.oidc.authserver.exception.OAuthException
 import com.dlai.oidc.authserver.repository.AuthorizationCodeRepository
 import com.dlai.oidc.authserver.repository.ClientRepository
 import com.dlai.oidc.authserver.repository.RefreshTokenRepository
@@ -58,7 +59,7 @@ class AuthorizationControllerTest {
 
         @Test
         fun `expect exception when response_type is not code`() {
-            val exception = assertThrows(IllegalArgumentException::class.java) {
+            assertThrows(OAuthException::class.java) {
                 authorizationController.authorize(
                     "some_other_response_type",
                     "demo-client",
@@ -70,13 +71,15 @@ class AuthorizationControllerTest {
                     null,
                     authentication
                 )
+            }.also {
+                assertEquals("invalid_request", it.error)
+                assertEquals("response_type must be 'code'", it.errorDescription)
             }
-            assertEquals("response_type must be 'code'", exception.message)
         }
 
         @Test
         fun `expect exception when clientId not registered`() {
-            val exception = assertThrows(IllegalArgumentException::class.java) {
+            assertThrows(OAuthException::class.java) {
                 authorizationController.authorize(
                     "code",
                     "other-client",
@@ -88,13 +91,15 @@ class AuthorizationControllerTest {
                     null,
                     authentication
                 )
+            }.also {
+                assertEquals("invalid_request", it.error)
+                assertEquals("Invalid client_id", it.errorDescription)
             }
-            assertEquals("Invalid client_id", exception.message)
         }
 
         @Test
         fun `expect exception when redirectUri not registered`() {
-            val exception = assertThrows(IllegalArgumentException::class.java) {
+            assertThrows(OAuthException::class.java) {
                 authorizationController.authorize(
                     "code",
                     "demo-client",
@@ -106,13 +111,15 @@ class AuthorizationControllerTest {
                     null,
                     authentication
                 )
+            }.also {
+                assertEquals("invalid_request", it.error)
+                assertEquals("Invalid redirect_uri", it.errorDescription)
             }
-            assertEquals("Invalid redirect_uri", exception.message)
         }
 
         @Test
         fun `expect exception when code_challenge_method is not supported for authorize request`() {
-            val exception = assertThrows(IllegalArgumentException::class.java) {
+            assertThrows(OAuthException::class.java) {
                 authorizationController.authorize(
                     "code",
                     "demo-client",
@@ -124,8 +131,10 @@ class AuthorizationControllerTest {
                     null,
                     authentication
                 )
+            }.also {
+                assertEquals("invalid_request", it.error)
+                assertEquals("code_challenge_method must be 'S256'", it.errorDescription)
             }
-            assertEquals("code_challenge_method must be 'S256'", exception.message)
         }
 
         @Test
@@ -271,7 +280,7 @@ class AuthorizationControllerTest {
 
         @Test
         fun `expect exception when code not present`() {
-            val exception = assertThrows(IllegalArgumentException::class.java) {
+            assertThrows(OAuthException::class.java) {
                 authorizationController.token(
                     "authorization_code",
                     null,
@@ -280,13 +289,15 @@ class AuthorizationControllerTest {
                     codeVerifier,
                     null
                 )
+            }.also {
+                assertEquals("invalid_request", it.error)
+                assertEquals("code is required", it.errorDescription)
             }
-            assertEquals("code is required", exception.message)
         }
 
         @Test
         fun `expect exception when code_verifier not present`() {
-            val exception = assertThrows(IllegalArgumentException::class.java) {
+            assertThrows(OAuthException::class.java) {
                 authorizationController.token(
                     "authorization_code",
                     "code",
@@ -295,13 +306,15 @@ class AuthorizationControllerTest {
                     null,
                     null
                 )
+            }.also {
+                assertEquals("invalid_request", it.error)
+                assertEquals("code_verifier is required", it.errorDescription)
             }
-            assertEquals("code_verifier is required", exception.message)
         }
 
         @Test
         fun `expect exception when code does not match`() {
-            val exception = assertThrows(IllegalArgumentException::class.java) {
+            assertThrows(OAuthException::class.java) {
                 authorizationController.token(
                     "authorization_code",
                     "some-other-code",
@@ -310,8 +323,10 @@ class AuthorizationControllerTest {
                     codeVerifier,
                     null
                 )
+            }.also {
+                assertEquals("invalid_grant", it.error)
+                assertEquals("Invalid code", it.errorDescription)
             }
-            assertEquals("Invalid code", exception.message)
         }
 
         @Test
@@ -331,7 +346,7 @@ class AuthorizationControllerTest {
             val location = authCodeResult.headers.location!!
             val code = UriComponentsBuilder.fromUri(location).build().queryParams.getFirst("code")!!
 
-            val exception = assertThrows(IllegalArgumentException::class.java) {
+            assertThrows(OAuthException::class.java) {
                 authorizationController.token(
                     "authorization_code",
                     code,
@@ -340,8 +355,10 @@ class AuthorizationControllerTest {
                     codeVerifier,
                     null
                 )
+            }.also {
+                assertEquals("invalid_grant", it.error)
+                assertEquals("Invalid client_id", it.errorDescription)
             }
-            assertEquals("Invalid client_id", exception.message)
         }
 
         @Test
@@ -361,7 +378,7 @@ class AuthorizationControllerTest {
             val location = authCodeResult.headers.location!!
             val code = UriComponentsBuilder.fromUri(location).build().queryParams.getFirst("code")!!
 
-            val exception = assertThrows(IllegalArgumentException::class.java) {
+            assertThrows(OAuthException::class.java) {
                 authorizationController.token(
                     "authorization_code",
                     code,
@@ -370,8 +387,10 @@ class AuthorizationControllerTest {
                     codeVerifier,
                     null
                 )
+            }.also {
+                assertEquals("invalid_grant", it.error)
+                assertEquals("Invalid redirect_uri", it.errorDescription)
             }
-            assertEquals("Invalid redirect_uri", exception.message)
         }
 
         @Test
@@ -391,7 +410,7 @@ class AuthorizationControllerTest {
             val location = authCodeResult.headers.location!!
             val code = UriComponentsBuilder.fromUri(location).build().queryParams.getFirst("code")!!
 
-            val exception = assertThrows(IllegalArgumentException::class.java) {
+            assertThrows(OAuthException::class.java) {
                 authorizationController.token(
                     "authorization_code",
                     code,
@@ -400,8 +419,10 @@ class AuthorizationControllerTest {
                     "a".repeat(43),
                     null
                 )
+            }.also {
+                assertEquals("invalid_grant", it.error)
+                assertEquals("Invalid code_verifier", it.errorDescription)
             }
-            assertEquals("Invalid code_verifier", exception.message)
         }
     }
 
@@ -471,7 +492,7 @@ class AuthorizationControllerTest {
         fun `expect exception when client_id does not match`() {
             val refreshToken = getRefreshTokenWithScope("profile email")
 
-            val exception = assertThrows(IllegalArgumentException::class.java) {
+            assertThrows(OAuthException::class.java) {
                 authorizationController.token(
                     "refresh_token",
                     null,
@@ -480,8 +501,10 @@ class AuthorizationControllerTest {
                     null,
                     refreshToken
                 )
+            }.also {
+                assertEquals("invalid_grant", it.error)
+                assertEquals("Invalid client_id", it.errorDescription)
             }
-            assertEquals("Invalid client_id", exception.message)
         }
 
         @Test
@@ -489,7 +512,7 @@ class AuthorizationControllerTest {
             val refreshToken = getRefreshTokenWithScope("profile email")
             refreshTokenRepository.consume(refreshToken)
 
-            val exception = assertThrows(IllegalArgumentException::class.java) {
+            assertThrows(OAuthException::class.java) {
                 authorizationController.token(
                     "refresh_token",
                     null,
@@ -498,13 +521,15 @@ class AuthorizationControllerTest {
                     null,
                     refreshToken
                 )
+            }.also {
+                assertEquals("invalid_grant", it.error)
+                assertEquals("Invalid refresh_token", it.errorDescription)
             }
-            assertEquals("Invalid refresh_token", exception.message)
         }
 
         @Test
         fun `expect exception when refresh_token is not found`() {
-            val exception = assertThrows(IllegalArgumentException::class.java) {
+            assertThrows(OAuthException::class.java) {
                 authorizationController.token(
                     "refresh_token",
                     null,
@@ -513,8 +538,10 @@ class AuthorizationControllerTest {
                     null,
                     "this-token-does-not-exist"
                 )
+            }.also {
+                assertEquals("invalid_grant", it.error)
+                assertEquals("Invalid refresh_token", it.errorDescription)
             }
-            assertEquals("Invalid refresh_token", exception.message)
         }
     }
 
