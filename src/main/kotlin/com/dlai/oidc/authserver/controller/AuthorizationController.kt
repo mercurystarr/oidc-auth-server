@@ -7,6 +7,7 @@ import com.dlai.oidc.authserver.repository.ClientRepository
 import com.dlai.oidc.authserver.repository.RefreshTokenRepository
 import com.dlai.oidc.authserver.security.PkceValidator
 import com.dlai.oidc.authserver.service.TokenService
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -37,6 +38,7 @@ class AuthorizationController(
 ) {
 
     private val secureRandom = SecureRandom()
+    private val logger = LoggerFactory.getLogger(AuthorizationController::class.java)
 
     @GetMapping("/authorize")
     fun authorize(
@@ -53,13 +55,19 @@ class AuthorizationController(
         if (responseType != "code") {
             throw OAuthException("invalid_request", "response_type must be 'code'")
         }
+        val client = clientRepository.findById(clientId)
+        if (client == null) {
+            logger.warn("endpoint=authorize client_id={} subject={} outcome=failure error=invalid_request", clientId, authentication.name)
+            throw OAuthException("invalid_request", "Invalid client_id")
+        }
 
-        val client = clientRepository.findById(clientId) ?: throw OAuthException("invalid_request", "Invalid client_id")
         if (!client.redirectUris.contains(redirectUri)) {
+            logger.warn("endpoint=authorize client_id={} subject={} outcome=failure error=invalid_request", clientId, authentication.name)
             throw OAuthException("invalid_request", "Invalid redirect_uri")
         }
 
         if (codeChallengeMethod != "S256") {
+            logger.warn("endpoint=authorize client_id={} subject={} outcome=failure error=invalid_request", clientId, authentication.name)
             throw OAuthException("invalid_request", "code_challenge_method must be 'S256'")
         }
 
@@ -88,6 +96,9 @@ class AuthorizationController(
             .queryParam("state", state)
             .build().toUri()
 
+        logger.info("endpoint=authorize client_id={} subject={} scope={} outcome=success",
+            clientId, authentication.name, scope)
+
         return ResponseEntity
             .status(HttpStatus.FOUND)
             .location(redirectUriWithCode)
@@ -110,12 +121,15 @@ class AuthorizationController(
             val authCode = authCodeRepository.consume(code) ?: throw OAuthException("invalid_grant", "Invalid code")
 
             if (clientId != authCode.clientId) {
+                logger.warn("endpoint=token grant_type=authorization_code client_id={} outcome=failure error=invalid_grant", clientId)
                 throw OAuthException("invalid_grant", "Invalid client_id")
             }
             if (redirectUri != authCode.redirectUri) {
+                logger.warn("endpoint=token grant_type=authorization_code client_id={} outcome=failure error=invalid_grant", clientId)
                 throw OAuthException("invalid_grant", "Invalid redirect_uri")
             }
             if (!PkceValidator.verify(codeVerifier, authCode.codeChallenge, authCode.codeChallengeMethod)) {
+                logger.warn("endpoint=token grant_type=authorization_code client_id={} outcome=failure error=invalid_grant", clientId)
                 throw OAuthException("invalid_grant", "Invalid code_verifier")
             }
             val responseBody = HashMap<String, Any>()
@@ -140,6 +154,10 @@ class AuthorizationController(
                 responseBody["scope"] = authCode.scopes.joinToString(" ")
             responseBody["token_type"] = "Bearer"
             responseBody["expires_in"] = expiryTime
+
+            logger.info("endpoint=token grant_type=authorization_code client_id={} subject={} scope={} outcome=success",
+                clientId, authCode.subject, authCode.scopes.joinToString(" "))
+
             return ResponseEntity.ok()
                 .header("Cache-Control", "no-store")
                 .header("Pragma", "no-cache")
@@ -148,6 +166,7 @@ class AuthorizationController(
             if (refreshToken == null) throw OAuthException("invalid_request", "refresh_token is required")
             when (val token = refreshTokenRepository.consume(refreshToken)) {
                 is RefreshTokenRepository.RefreshTokenResult.Reused -> {
+                    logger.warn("endpoint=token grant_type=refresh_token client_id={} outcome=failure error=invalid_grant reason=token_reuse", clientId)
                     throw OAuthException("invalid_grant", "Invalid refresh_token")
                 }
 
@@ -156,6 +175,7 @@ class AuthorizationController(
                     val responseBody = HashMap<String, Any>()
                     // RFC 6749 §6 ensure that the refresh token was issued to the authenticated client
                     if (clientId != token.refreshToken.clientId) {
+                        logger.warn("endpoint=token grant_type=refresh_token client_id={} outcome=failure error=invalid_grant", clientId)
                         throw OAuthException("invalid_grant", "Invalid client_id")
                     }
                     responseBody["access_token"] =
@@ -181,6 +201,9 @@ class AuthorizationController(
                         responseBody["scope"] = token.refreshToken.scopes.joinToString(" ")
                     responseBody["token_type"] = "Bearer"
                     responseBody["expires_in"] = expiryTime
+                    logger.info("endpoint=token grant_type=refresh_token client_id={} subject={} scope={} outcome=success",
+                        clientId, token.refreshToken.subject, token.refreshToken.scopes.joinToString(" "))
+
                     return ResponseEntity.ok()
                         .header("Cache-Control", "no-store")
                         .header("Pragma", "no-cache")
@@ -188,10 +211,12 @@ class AuthorizationController(
                 }
 
                 RefreshTokenRepository.RefreshTokenResult.NotFound -> {
+                    logger.warn("endpoint=token grant_type=refresh_token client_id={} outcome=failure error=invalid_grant", clientId)
                     throw OAuthException("invalid_grant", "Invalid refresh_token")
                 }
             }
         } else {
+            logger.warn("endpoint=token grant_type={} outcome=failure error=unsupported_grant_type", grantType)
             throw OAuthException("unsupported_grant_type", "grant_type must be 'authorization_code' or 'refresh_token'")
         }
     }
