@@ -16,6 +16,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("com.nimbusds:nimbus-jose-jwt:10.9.1")
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
 
     runtimeOnly("com.h2database:h2")
 
